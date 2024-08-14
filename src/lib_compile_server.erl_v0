@@ -1,0 +1,170 @@
+%%%-------------------------------------------------------------------
+%%% @author c50 <joq62@c50>
+%%% @copyright (C) 2024, c50
+%%% @doc
+%%%
+%%% @end
+%%% Created : 29 Jul 2024 by c50 <joq62@c50>
+%%%-------------------------------------------------------------------
+-module(lib_compile_server).
+
+%% API
+-export([compile/1]).
+
+%%%===================================================================
+%%% API
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+%% 
+%% @end
+%%--------------------------------------------------------------------
+
+    
+    
+
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+git_clone(GitPath,GitDir)->
+    file:del_dir_r(GitDir),
+    GitCloneResult=os:cmd("git clone "++?GitPath),  
+    GitCloneResult.
+
+compile(ApplicationDir)->
+    CWD=file:get_cwd(),
+    Result=case file:set_cwd(ApplicationDir) of
+	       {error,Reason}->
+		   {error,Reason};
+	       ok->
+		   % Clean up before 
+		   file:delete("rebar.lock"),
+		   file:del_dir_r("_build"),    	    
+		   [C||C<-os:cmd("rebar3 compile"),
+		       C<256]
+	   end,
+    ok=file:set_cwd(CWD),
+    Result.
+    
+release(ApplicationDir)->
+    CWD=file:get_cwd(),
+    Result=case file:set_cwd(ApplicationDir) of
+	       {error,Reason}->
+		   {error,Reason};
+	       ok->    	    
+		   [C||C<-os:cmd("rebar3 release"),
+		       C<256]
+	   end,
+    ok=file:set_cwd(CWD),
+    Result.
+create_tar_file(Application,ApplicationDir,ReleaseDir,TarFileSrc,TarFileDest)->
+    CWD=file:get_cwd(),
+    Result=case file:set_cwd(ApplicationDir) of
+	       {error,Reason}->
+		   {error,Reason};
+	       ok->    	    
+		   file:del_dir_r(ReleaseDir),    
+		   ProdTarResult=[C||C<-os:cmd("rebar3 as prod tar"),
+				     C<256],
+		   ok=file:make_dir(ReleaseDir),
+		   case os:cmd("cp _build/prod/rel/"++Application++"/"++TarFileSrc++" "++TarFileDest) of
+		       []->
+			   case filelib:is_file(TarFileDest) of
+			       true->
+				   {ok,ProdTarResult};
+			       false ->
+				   {error,["Failed to create Tarfile at destination",ProdTarResult]}
+			   end;
+		       Reason ->
+			   {error,["Failed to copy Tarfile ",Reason]}
+		   end
+	   end,
+    ok=file:set_cwd(CWD),
+    Result.
+
+unpack_tar_file(TarFileSrc,TargetDir)->
+    CWD=file:get_cwd(),
+    Result=case file:set_cwd(ApplicationDir) of
+	       {error,Reason}->
+		   {error,Reason};
+	       ok->    
+		   file:del_dir_r(TargetDir),
+		   ok=file:make_dir(TargetDir),   
+		   case os:cmd("tar -zxf "++TarFileSrc++" -C "++TargetDir) of
+		       []->
+			   ok;
+		       Reason->
+			   {error,["Failed to unpack Tarfile ",TarFileSrc,Reason]}
+		   end
+	   end,
+    ok=file:set_cwd(CWD),
+    Result.   
+    
+
+    GitPath="https://github.com/joq62/Application.git",
+    GitDir=Application,
+    {ok,HomeDir}=file:get_cwd(),
+    ReleaseDir="release",
+    TargetDir=Application++"_dir",
+    {ok,HostName}=net:gethostname(),
+    Vm=list_to_atom(Application++"@"++HostName),
+    TarFile=Application++"-0.1.0.tar.gz",
+    App=Application,
+    TarSrc="release"++"/"++TarFile,
+    StartCmd="./"++TargetDir++"/"++"bin"++"/"++App,
+
+    rpc:call(Vm,init,stop,[],5000),
+    timer:sleep(3000),
+    {badrpc,nodedown}=rpc:call(Vm,adder3,add,[20,24],5000),
+    %% git clone dir to be compiled
+
+    GitDirPath=filename:join(HomeDir,GitDir),
+    file:del_dir_r(GitDirPath),
+    GitClone=os:cmd("git clone "++?GitPath),  
+    io:format("GitClone ~p~n",[{GitClone,?MODULE,?LINE}]),  
+
+    ok=file:set_cwd(GitDirPath),
+    {ok,GitDirPath}=file:get_cwd(),    
+  
+    %% Clean up
+    file:delete("rebar.lock"),
+    file:del_dir_r("_build"),    
+    file:del_dir_r(ReleaseDir),    
+    file:del_dir_r(TargetDir),
+
+    %% compile
+    Rebar3Compile=[C||C<-os:cmd("rebar3 compile"),
+		      C<256],
+    io:format("Rebar3 release result ~p~n",[{Rebar3Compile,?MODULE,?LINE}]),
+       
+    Rebar3Release=[C||C<-os:cmd("rebar3 release"),
+		      C<256],
+    io:format("Rebar3 release result ~p~n",[{Rebar3Release,?MODULE,?LINE}]),
+    Rebar3ProdTar=[C||C<-os:cmd("rebar3 as prod tar"),
+		      C<256],
+    io:format("Rebar3 release prod tar result ~p~n",[{Rebar3ProdTar,?MODULE,?LINE}]),      
+    %%
+    ok=file:make_dir(ReleaseDir),
+    []=os:cmd("cp _build/prod/rel/"++Application++"/"++TarFile++" "++TarSrc),
+    true=filelib:is_file(TarSrc),
+
+    %% unpack 
+    ok=file:make_dir(TargetDir),   
+    []=os:cmd("tar -zxf "++TarSrc++" -C "++TargetDir),
+    []=os:cmd(StartCmd++" "++"daemon"),
+    timer:sleep(3000),
+    pong=rpc:call(Vm,rd,ping,[],5000),
+    pong=rpc:call(Vm,log,ping,[],5000),
+    pong=rpc:call(Vm,adder3,ping,[],5000), 
+    
+    42=rpc:call(Vm,adder3,add,[20,22],5000),
+    
+    
+    io:format("Success ~p~n",[{?MODULE,?LINE}]),
+    timer:sleep(1000),
+    init:stop(),
+    
+    	
+    ok.
