@@ -71,7 +71,7 @@ release(ApplicationDir)->
 %% @end
 %%--------------------------------------------------------------------
 start_application(ReleaseFile,"daemon")->
-    StartCmd="./"++ReleaseFile,
+    StartCmd="."++ReleaseFile,
     Result=case os:cmd(StartCmd++" "++"daemon") of
 	       []->
 		   ok;
